@@ -11,6 +11,24 @@ import os
 log = logging.getLogger(__name__)
 
 
+def hotfix(info):
+    # 因為TRI 90/270 方向不對，需要轉90度
+    _anglestrs = ['90', '270']
+    if info['Angle'] not in _anglestrs:
+        return
+
+    x1 = info['X1']
+    x2 = info['X2']
+    y1 = info['Y1']
+    y2 = info['Y2']
+
+    cx, cy = (x1+x2)//2, (y1+y2)//2
+    w, h = (x2-x1)//2, (y2-y1)//2
+
+    info['X1'], info['X2'] = cx-h, cx+h
+    info['Y1'], info['Y2'] = cy-w, cy+w
+
+
 def read_AOI_Result(filename):
     tree = ET.ElementTree(file=filename)
     root = tree.getroot()
@@ -54,8 +72,7 @@ def read_AOI_Result(filename):
                 info['Y2'] = int(win.attrib['Y2'])
                 info['PicPath'] = win.attrib['PicPath']
                 info['WindowInfo'] = win.attrib['WindowInfo']
-                info['width'] = int(win.attrib['X2'])-int(win.attrib['X1'])
-                info['height'] = int(win.attrib['Y2'])-int(win.attrib['Y1'])
+                hotfix(info)
                 win_infos.append(info)
     return c_infos, win_infos
 
