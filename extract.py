@@ -5,10 +5,14 @@ import logging
 import cv2
 from PIL import Image
 import json
+import threading
+import time
+import queue
 
 from aoi_reader import listXML, read_AOI_Result
 
 log = logging.getLogger(__name__)
+lock = threading.Lock()
 
 
 def genMinROI(info):
@@ -47,11 +51,19 @@ def combinPath(XMLPath, PicPath):
 
 def mkdestDir(dest, datecode, SN, side):
     outdir = path.join(dest, datecode)
+    lock.acquire()
     if not path.exists(outdir):
-        os.mkdir(outdir)
+        try:
+            os.mkdir(outdir)
+        except IOError:
+            pass
     outdir = path.join(outdir, '%s_%s' % (SN, side))
     if not path.exists(outdir):
-        os.mkdir(outdir)
+        try:
+            os.mkdir(outdir)
+        except IOError:
+            pass
+    lock.release()
     return outdir
 
 
@@ -83,48 +95,97 @@ def drawimage(xmlfile, dest):
         cv2.imwrite(path.join(outdir, name), im)
 
 
-def extract(xmlfile, dest):
-    _, winfos = read_AOI_Result(xmlfile)
-    if len(winfos) == 0:
-        return
-    datecode = path.basename(xmlfile)[:8]
-    SN = winfos[0]['SN']
-    SIDE = winfos[0]['side']
-    outdir = mkdestDir(
-        dest=dest,
-        datecode=datecode,
-        SN=SN,
-        side=SIDE
-        )
-    index = 0
-    picDict = {}
-    for info in winfos:
-        picfile = combinPath(xmlfile, info['PicPath'])
-        if not path.isfile(picfile):
-            log.warning("picfile not exists %s", picfile)
-        if picfile in picDict:
-            im = picDict[picfile]
-        else:
-            try:
-                im = Image.open(picfile)
-                picDict[picfile] = im
-            except IOError as ex:
-                log.warning("except %s", str(ex))
-                continue
-        index += 1
-        out_name = '%s_%s_%s_%s' % (datecode, SN, SIDE, path.basename(picfile)[:-4])
-        name = out_name+'-%04d.png' % index
-        x1, y1, x2, y2 = genMinROI(info)
-        # cv2.imshow('Main', im[y1:y2, x1:x2])
-        # cv2.waitKey(0)
-        img = im.crop((x1, y1, x2, y2))
-        if (x2-x1) > 50 or (y2-y1) > 50:
-            img = img.resize((50, 50))
-        img.save(path.join(outdir, name))
-        # print(path.join(outdir, name))
-        name = out_name+'-%04d.json' % index
-        with open(path.join(outdir, name), 'wt') as fp:
-            json.dump(info, fp)
+class JobQueue:
+    def __init__(self):
+        self.queue = queue.Queue()
+        self.lock = threading.Lock()
+
+    def get(self):
+        try:
+            self.lock.acquire()
+            if self.queue.qsize():
+                return self.queue.get()
+        finally:
+            self.lock.release()
+
+    def size(self):
+        return self.queue.qsize()
+
+    def put(self, value):
+        try:
+            self.lock.acquire()
+            self.queue.put(value)
+        finally:
+            self.lock.release()
+
+
+class extract_thread(threading.Thread):
+    def __init__(self, dest, queue, name=None):
+        threading.Thread.__init__(self)
+        self.dest = dest
+        self.queue = queue
+        self.terminate = False
+        self._loop = True
+        if name:
+            self.setName(name)
+        self.start()
+
+    def run(self):
+        while self._loop:
+            xmlfile = self.queue.get()
+            if xmlfile is None:
+                break
+            self.extract(xmlfile, self.dest)
+        log.info('thread %s terminate', self._name)
+        self.terminate = True
+
+    def forceExit(self):
+        self._loop = False
+
+    def extract(self, xmlfile, dest):
+        _, winfos = read_AOI_Result(xmlfile)
+        if len(winfos) == 0:
+            return
+        datecode = path.basename(xmlfile)[:8]
+        SN = winfos[0]['SN']
+        SIDE = winfos[0]['side']
+        outdir = mkdestDir(
+            dest=dest,
+            datecode=datecode,
+            SN=SN,
+            side=SIDE
+            )
+        index = 0
+        picDict = {}
+        for info in winfos:
+            if not self._loop:
+                break
+            picfile = combinPath(xmlfile, info['PicPath'])
+            if not path.isfile(picfile):
+                log.warning("picfile not exists %s", picfile)
+            if picfile in picDict:
+                im = picDict[picfile]
+            else:
+                try:
+                    im = Image.open(picfile)
+                    picDict[picfile] = im
+                except IOError as ex:
+                    log.warning("except %s", str(ex))
+                    continue
+            index += 1
+            out_name = '%s_%s_%s_%s' % (datecode, SN, SIDE, path.basename(picfile)[:-4])
+            name = out_name+'-%04d.png' % index
+            x1, y1, x2, y2 = genMinROI(info)
+            # cv2.imshow('Main', im[y1:y2, x1:x2])
+            # cv2.waitKey(0)
+            img = im.crop((x1, y1, x2, y2))
+            if (x2-x1) > 50 or (y2-y1) > 50:
+                img = img.resize((50, 50))
+            img.save(path.join(outdir, name))
+            # print(path.join(outdir, name))
+            name = out_name+'-%04d.json' % index
+            with open(path.join(outdir, name), 'wt') as fp:
+                json.dump(info, fp)
 
 
 def argsParser():
@@ -140,14 +201,24 @@ if __name__ == "__main__":
     args = argsParser()
     logging.basicConfig(level=logging.INFO if args.debug else logging.ERROR)
 
+    jobs = JobQueue()
     files = listXML(args.src)
 
     total = len(files)
     print('total:', total)
     for filename in files:
-        # log.info(filename)
-        # drawimage(xmlfile=filename, dest=args.dest)
-        extract(xmlfile=filename, dest=args.dest)
-        total -= 1
-        print('\r', total, end=' ', flush=True)
+        jobs.put(filename)
+    threads = [extract_thread(dest=args.dest, queue=jobs, name="thread %02d" % index) for index in range(5)]
+    try:
+        while True:
+            print('\r', jobs.size(), end=' ', flush=True)
+            time.sleep(1)
+            t = [x for x in threads if x.terminate is True]
+            if len(t) == len(threads):
+                log.info("all thread finish")
+                break
+    except KeyboardInterrupt:
+        [x.forceExit for x in threads]
+        time.sleep(3)
+    [x.join() for x in threads]
     print('\n succes')
