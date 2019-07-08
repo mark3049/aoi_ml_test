@@ -87,11 +87,14 @@ def extract(xmlfile, dest):
     _, winfos = read_AOI_Result(xmlfile)
     if len(winfos) == 0:
         return
+    datecode = path.basename(xmlfile)[:8]
+    SN = winfos[0]['SN']
+    SIDE = winfos[0]['side']
     outdir = mkdestDir(
         dest=dest,
-        datecode=path.basename(xmlfile)[:8],
-        SN=winfos[0]['SN'],
-        side=winfos[0]['side']
+        datecode=datecode,
+        SN=SN,
+        side=SIDE
         )
     index = 0
     picDict = {}
@@ -109,7 +112,8 @@ def extract(xmlfile, dest):
                 log.warning("except %s", str(ex))
                 continue
         index += 1
-        name = path.basename(picfile)[:-4]+'-%04d.png' % index
+        out_name = '%s_%s_%s_%s' % (datecode, SN, SIDE, path.basename(picfile)[:-4])
+        name = out_name+'-%04d.png' % index
         x1, y1, x2, y2 = genMinROI(info)
         # cv2.imshow('Main', im[y1:y2, x1:x2])
         # cv2.waitKey(0)
@@ -118,7 +122,7 @@ def extract(xmlfile, dest):
             img = img.resize((50, 50))
         img.save(path.join(outdir, name))
         # print(path.join(outdir, name))
-        name = path.basename(picfile)[:-4]+'-%04d.json' % index
+        name = out_name+'-%04d.json' % index
         with open(path.join(outdir, name), 'wt') as fp:
             json.dump(info, fp)
 
@@ -133,12 +137,9 @@ def argsParser():
 
 
 if __name__ == "__main__":
-    import sys
     args = argsParser()
     logging.basicConfig(level=logging.INFO if args.debug else logging.ERROR)
 
-    src_path = '/home/mark/test'
-    dest_path = '/home/mark/result'
     files = listXML(args.src)
 
     total = len(files)
@@ -148,6 +149,5 @@ if __name__ == "__main__":
         # drawimage(xmlfile=filename, dest=args.dest)
         extract(xmlfile=filename, dest=args.dest)
         total -= 1
-        sys.stdout.write('\r %d ' % total)
-        sys.stdout.flush()
+        print('\r', total, end=' ', flush=True)
     print('\n succes')
