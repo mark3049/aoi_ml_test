@@ -34,11 +34,11 @@ def cnn_model():
 
 def combin_model():
     cnn = cnn_model()
-    one_hot = Input(shape=(16,), name='AOI_Result')
+    one_hot = Input(shape=(43,), name='AOI_Result')
     x = keras.layers.concatenate([one_hot, cnn.output])
     # x = keras.layers.Dense(128, activation='relu')(x)
     # x = keras.layers.Dropout(0.5)(x)
-    main_output = keras.layers.Dense(10, activation='softmax')(x)
+    main_output = keras.layers.Dense(12, activation='softmax')(x)
     model = Model(inputs=[one_hot, cnn.input], outputs=[main_output])
     return model
 
