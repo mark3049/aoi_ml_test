@@ -9,23 +9,31 @@ import threading
 import time
 import queue
 
-from aoi_reader import listXML, read_AOI_Result
+from aoi_reader import listXML
+from aoi_reader import SFC_Reader, InspDataReader, combin
 
 log = logging.getLogger(__name__)
 lock = threading.Lock()
 
 
 def genMinROI(info):
+    scale = 1.25
     x1 = info['X1']
     x2 = info['X2']
     y1 = info['Y1']
     y2 = info['Y2']
     cx, cy = (x1+x2)//2, (y1+y2)//2
-    w, h = (x2-x1), (y2-y1)
+    w, h = int((x2-x1)*scale), int((y2-y1)*scale)
     if w < 50:
         x1, x2 = cx-25, cx + 25
     if h < 50:
         y1, y2 = cy-25, cy + 25
+    if x1 < 0:
+        x2 -= x1
+        x1 = 0
+    if y1 < 0:
+        y2 -= y1
+        y1 = 0
     return x1, y1, x2, y2
 
 
@@ -67,34 +75,6 @@ def mkdestDir(dest, datecode, SN, side):
     return outdir
 
 
-def drawimage(xmlfile, dest):
-    _, winfos = read_AOI_Result(xmlfile)
-    if len(winfos) == 0:
-        return
-
-    outdir = mkdestDir(
-        dest=dest,
-        datecode=path.basename(xmlfile)[:8],
-        SN=winfos[0]['SN'],
-        side=winfos[0]['side'])
-
-    pictures = {}
-    for info in winfos:
-        picfile = combinPath(xmlfile, info['PicPath'])
-        if not path.isfile(picfile):
-            log.error('picture not exist %s', picfile)
-        if picfile in pictures:
-            im = pictures[picfile]
-        else:
-            im = cv2.imread(picfile)
-        drawRect(im, info)
-        pictures[picfile] = im
-
-    for picfile, im in pictures.items():
-        name = path.basename(picfile)[:-4]+'.jpg'
-        cv2.imwrite(path.join(outdir, name), im)
-
-
 class JobQueue:
     def __init__(self):
         self.queue = queue.Queue()
@@ -126,9 +106,19 @@ class extract_thread(threading.Thread):
         self.queue = queue
         self.terminate = False
         self._loop = True
+        self.insp_reader = InspDataReader()
+        self.sfc_reader = SFC_Reader()
         if name:
             self.setName(name)
         self.start()
+
+    def read_xml(self, filename):
+        sfc = self.sfc_reader.read(filename)
+        insp = self.insp_reader.read(filename)
+        if sfc is None or insp is None:
+            return None
+        combin(sfc=sfc, insp=insp)
+        return sfc
 
     def run(self):
         while self._loop:
@@ -143,12 +133,12 @@ class extract_thread(threading.Thread):
         self._loop = False
 
     def extract(self, xmlfile, dest):
-        _, winfos = read_AOI_Result(xmlfile)
-        if len(winfos) == 0:
+        info = self.read_xml(xmlfile)
+        if info is None:
             return
         datecode = path.basename(xmlfile)[:8]
-        SN = winfos[0]['SN']
-        SIDE = winfos[0]['side']
+        SN = path.basename(xmlfile)[15:-4]
+        SIDE = info['TB']
         outdir = mkdestDir(
             dest=dest,
             datecode=datecode,
@@ -157,41 +147,60 @@ class extract_thread(threading.Thread):
             )
         index = 0
         picDict = {}
-        for info in winfos:
-            if not self._loop:
-                break
-            picfile = combinPath(xmlfile, info['PicPath'])
-            if not path.isfile(picfile):
-                log.warning("picfile not exists %s", picfile)
-            if picfile in picDict:
-                im = picDict[picfile]
-            else:
-                try:
-                    im = Image.open(picfile)
-                    picDict[picfile] = im
-                except IOError as ex:
-                    log.warning("except %s", str(ex))
-                    continue
-            index += 1
-            out_name = '%s_%s_%s_%s' % (datecode, SN, SIDE, path.basename(picfile)[:-4])
-            name = out_name+'-%04d.png' % index
-            x1, y1, x2, y2 = genMinROI(info)
-            # cv2.imshow('Main', im[y1:y2, x1:x2])
-            # cv2.waitKey(0)
-            img = im.crop((x1, y1, x2, y2))
-            if (x2-x1) > 50 or (y2-y1) > 50:
-                img = img.resize((50, 50))
-            img.save(path.join(outdir, name))
-            # print(path.join(outdir, name))
-            name = out_name+'-%04d.json' % index
-            with open(path.join(outdir, name), 'wt') as fp:
-                json.dump(info, fp)
+        for bkey, Board in info['Board'].items():
+            for ckey, Component in Board['Component'].items():
+                false_call = Component['Status'] == 'False Call'
+                for wkey, Window in Component['Windows'].items():
+                    if type(Window) != dict:
+                        continue
+                    if not false_call and Window['Status'] == 'False Call':
+                        continue
+
+                    picfile = combinPath(xmlfile, Window['PicPath'])
+                    if not path.isfile(picfile):
+                        log.warning("picfile not exists %s", picfile)
+                    if picfile in picDict:
+                        im = picDict[picfile]
+                    else:
+                        try:
+                            im = Image.open(picfile)
+                            picDict[picfile] = im
+                        except IOError as ex:
+                            log.warning("except %s", str(ex))
+                            continue
+                    index += 1
+                    out_name = '%s_%s_%s_%s' % (datecode, SN, SIDE, path.basename(picfile)[:-4])
+                    name = out_name+'-%04d.png' % index
+                    x1, y1, x2, y2 = genMinROI(Window)
+                    # cv2.imshow('Main', im[y1:y2, x1:x2])
+                    # cv2.waitKey(0)
+                    width, height = im.size
+                    if x1 < 0:
+                        x1 = 0
+                    if y1 < 0:
+                        y1 = 0
+                    if x2 >= width:
+                        x2 = width-1
+                    if y2 >= height:
+                        y2 = height-1
+                    img = im.crop((x1, y1, x2, y2))
+
+                    img = img.resize((50, 50))
+                    img.save(path.join(outdir, name))
+                    # print(path.join(outdir, name))
+                    name = out_name+'-%04d.json' % index
+                    with open(path.join(outdir, name), 'wt') as fp:
+                        json.dump(Window, fp)
+        if index == 0:
+            pass
+            # print(xmlfile)
 
 
 def argsParser():
     import argparse
     p = argparse.ArgumentParser(description='Extract AOI XML/MAP')
     p.add_argument('-d', '--debug', action='store_true', default=False)
+    p.add_argument('-t', '--thread', type=int, default=5, help='work thread count')
     p.add_argument('src', help='AOI File Path')
     p.add_argument('dest', help='Output Path')
     return p.parse_args()
@@ -208,7 +217,8 @@ if __name__ == "__main__":
     print('total:', total)
     for filename in files:
         jobs.put(filename)
-    threads = [extract_thread(dest=args.dest, queue=jobs, name="thread %02d" % index) for index in range(5)]
+
+    threads = [extract_thread(dest=args.dest, queue=jobs, name="thread %02d" % index) for index in range(args.thread)]
     try:
         while True:
             print('\r', jobs.size(), end=' ', flush=True)

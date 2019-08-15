@@ -25,21 +25,25 @@ def cnn_model():
     model.add(MaxPooling2D(pool_size=(2, 2)))
 
     model.add(Flatten())
-    model.add(keras.layers.Dense(128, activation='relu'))
-    model.add(keras.layers.Dropout(0.5))
+    model.add(keras.layers.Dense(256, activation='relu'))
+    # model.add(keras.layers.Dropout(0.5))
+    model.add(keras.layers.Dense(64, activation='relu'))
     # model.add(Dense(10, activation='softmax'))
     # model.summary()
     return model
 
 
-def combin_model():
+def combin_model(MachineDefectSize, AlgorithmDefectSize):
     cnn = cnn_model()
-    one_hot = Input(shape=(43,), name='AOI_Result')
-    x = keras.layers.concatenate([one_hot, cnn.output])
-    # x = keras.layers.Dense(128, activation='relu')(x)
+    MachineDefect = Input(shape=(MachineDefectSize,), name='MachineDefect')
+    AlgorithmDefect = Input(shape=(AlgorithmDefectSize,), name='AlgorithmDefect')
+    x = keras.layers.concatenate([MachineDefect, AlgorithmDefect, cnn.output])
+    x = keras.layers.Dense(128, activation='relu')(x)
+    x = keras.layers.Dense(64, activation='relu')(x)
+    x = keras.layers.Dense(32, activation='relu')(x)
     # x = keras.layers.Dropout(0.5)(x)
-    main_output = keras.layers.Dense(12, activation='softmax')(x)
-    model = Model(inputs=[one_hot, cnn.input], outputs=[main_output])
+    main_output = keras.layers.Dense(2, activation='softmax')(x)
+    model = Model(inputs=[MachineDefect, AlgorithmDefect, cnn.input], outputs=[main_output])
     return model
 
 
