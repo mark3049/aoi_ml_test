@@ -54,16 +54,9 @@ class SplitDataset:
             if self.preprocess:
                 im = self.preprocess.random_transform(im)
             imf = np.asarray(im, dtype=np.float)*1.0/255
-            if imf.shape != (50, 50, 3):
-                print(imf.shape)
             imfs.append(imf)
-        t = []
-        t.append(np.array(imfs))
-        t.append(np.array(machines))
-        t.append(np.array(OPs))
-        t.append(np.array(algorithms))
-        print(t[0].shape, t[1].shape, t[2].shape, t[3].shape)
-        return t
+
+        return np.array(imfs), np.array(machines), np.array(OPs), np.array(algorithms)
 
     def getSample(self, batch_size):
         indices = []
@@ -88,7 +81,7 @@ class DataSet(SplitDataset):
     def __init__(self, filename, config):
         super(DataSet, self).__init__(filename, config)
         self.rows = []
-        self.rows.extend(self.falsecall_rows)
+        self.rows.extend(self.falsecall_rows[:len(self.defect_rows)*2])
         self.rows.extend(self.defect_rows)
         random.shuffle(self.rows)
         self.size = len(self.rows)
@@ -97,9 +90,16 @@ class DataSet(SplitDataset):
         return random.sample(self.rows, batch_size)
 
 
+def loss_func(y_true, y_pred):
+    pass
+
+
 def train(config, trainset, verifyset, batch_size=128, save_weight='model_1.h5'):
     from keras.callbacks import TensorBoard
+    from keras.callbacks import ReduceLROnPlateau
+    from keras import losses
 
+    lrf = ReduceLROnPlateau(monitor='val_acc', min_lr=5e-5, verbose=1, patience=3, factor=0.99)
     if os.path.isdir(tensorboard_logdir):
         shutil.rmtree(tensorboard_logdir, ignore_errors=True)
     os.mkdir(tensorboard_logdir)
@@ -111,24 +111,26 @@ def train(config, trainset, verifyset, batch_size=128, save_weight='model_1.h5')
         write_images=True
         )
     # fine-tune the model
-    callbacks = [tbCallback]
+    callbacks = [tbCallback, lrf]
 
+    class_weight = {0: 1, 1: 10}
     model = combin_model(len(config['MachineDefect']), len(config['AlgorithmDefect']))
     model.compile(
-        loss='categorical_crossentropy',
-        optimizer=keras.optimizers.adam(lr=0.001, decay=4e-3),
-        metrics=['accuracy']
+        loss=losses.categorical_crossentropy,
+        optimizer=keras.optimizers.adam(),
+        metrics=['accuracy'],
     )
     model.summary()
     try:
         model.fit_generator(
             trainset.data_gen(batch_size=batch_size),
             steps_per_epoch=trainset.size//batch_size,
-            epochs=200,
+            epochs=5000,
             validation_data=verifyset.data_gen(batch_size=batch_size),
             validation_steps=verifyset.size//batch_size,
             verbose=1,
-            callbacks=callbacks
+            callbacks=callbacks,
+            class_weight=class_weight
         )
     except KeyboardInterrupt:
         pass
@@ -143,7 +145,7 @@ if __name__ == "__main__":
         height_shift_range=0.02,
         horizontal_flip=True
     )
-    trainset = SplitDataset('/home/mark/result/train', config, sample_scale=16, preprocess=datagen)
+    trainset = SplitDataset('/home/mark/result/train', config, sample_scale=2, preprocess=datagen)
     verifyset = SplitDataset('/home/mark/result/test', config, sample_scale=2)
     print(trainset.size, verifyset.size)
     train(config, trainset, verifyset, batch_size=32)

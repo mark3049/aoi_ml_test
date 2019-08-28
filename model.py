@@ -17,17 +17,23 @@ def cnn_model():
 
     model = keras.models.Sequential(name='image')
     model.add(keras.layers.InputLayer(input_shape=input_shape, name='AOI_Image'))
-    model.add(Conv2D(32, (3, 3), activation='relu'))  # , input_shape=input_shape, name='Conv2D_1'))
+    # , input_shape=input_shape, name='Conv2D_1'))
+    model.add(Conv2D(32, (3, 3), activation='relu', padding='same'))
+    model.add(Conv2D(32, (3, 3), activation='relu', padding='same'))
     model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Conv2D(32, (3, 3), activation='relu', name='Conv2D_2'))
+
+    model.add(Conv2D(32, (3, 3), activation='relu',  padding='same'))
+    model.add(Conv2D(32, (3, 3), activation='relu',  padding='same'))
     model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Conv2D(64, (3, 3), activation='relu', name='Conv2D_3'))
+
+    model.add(Conv2D(64, (3, 3), activation='relu',  padding='same'))
+    model.add(Conv2D(64, (3, 3), activation='relu',  padding='same'))
     model.add(MaxPooling2D(pool_size=(2, 2)))
 
     model.add(Flatten())
-    model.add(keras.layers.Dense(256, activation='relu'))
+    # model.add(keras.layers.Dense(1024, activation='relu'))
     # model.add(keras.layers.Dropout(0.5))
-    model.add(keras.layers.Dense(64, activation='relu'))
+    # model.add(keras.layers.Dense(64, activation='relu'))
     # model.add(Dense(10, activation='softmax'))
     # model.summary()
     return model
@@ -38,9 +44,11 @@ def combin_model(MachineDefectSize, AlgorithmDefectSize):
     MachineDefect = Input(shape=(MachineDefectSize,), name='MachineDefect')
     AlgorithmDefect = Input(shape=(AlgorithmDefectSize,), name='AlgorithmDefect')
     x = keras.layers.concatenate([MachineDefect, AlgorithmDefect, cnn.output])
-    x = keras.layers.Dense(128, activation='relu')(x)
-    x = keras.layers.Dense(64, activation='relu')(x)
-    x = keras.layers.Dense(32, activation='relu')(x)
+    x = keras.layers.Dense(512, activation='relu')(x)
+    x = keras.layers.Dropout(0.5)(x)
+    x = keras.layers.Dense(512, activation='relu')(x)
+    # x = keras.layers.Dense(64, activation='relu')(x)
+    # x = keras.layers.Dense(32, activation='relu')(x)
     # x = keras.layers.Dropout(0.5)(x)
     main_output = keras.layers.Dense(2, activation='softmax')(x)
     model = Model(inputs=[MachineDefect, AlgorithmDefect, cnn.input], outputs=[main_output])
@@ -48,7 +56,11 @@ def combin_model(MachineDefectSize, AlgorithmDefectSize):
 
 
 if __name__ == "__main__":
-    model = combin_model()
+    from makedataset import read_json
+    config = read_json(os.path.join('dataset', 'config.json'))
+
+    model = combin_model(
+        len(config['MachineDefect']), len(config['AlgorithmDefect']))
     model.compile(
         loss='categorical_crossentropy',
         optimizer=keras.optimizers.adam(lr=0.001, decay=4e-4),

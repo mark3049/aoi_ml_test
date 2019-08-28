@@ -8,7 +8,7 @@ from makedataset import read_json
 
 if __name__ == "__main__":
     config = read_json(os.path.join('dataset', 'config.json'))
-    verifyset = DataSet('/home/mark/result/test', config)
+    verifyset = DataSet('/home/mark/result/verify', config)
     model = combin_model(len(config['MachineDefect']), len(config['AlgorithmDefect']))
     model.load_weights('model_1.h5')
 
