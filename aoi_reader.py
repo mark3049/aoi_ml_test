@@ -1,4 +1,5 @@
 # -*- coding: UTF-8 -*-
+
 import logging
 # import xml.etree.cElementTree as ET
 import xml.etree.ElementTree as ET
@@ -238,6 +239,8 @@ def argsParser():
     # p.add_argument('-s', '--skip', action='store_true', default=False)
     # p.add_argument('-c', '--csv', action='store_true', default=False)
     # p.add_argument('-w', '--wininfo', action='store_true', default=False)
+    # 實驗性功能，包含原廠無說明的7500SIII_B.xml or 7500SIII_A.xml檔案
+    p.add_argument('--station', action='store_true', default=False, help="包含7500SIII_A/B.xml")
     p.add_argument('src', help='AOI File Path')
     return p.parse_args()
 
@@ -248,19 +251,22 @@ if __name__ == '__main__':
     log.info(args)
     files = listXML(args.src)
     total = len(files)
+    log.info('total file %d', total)
     insp_reader = InspDataReader()
     sfc_reader = SFC_Reader()
     for file in files:
+        # 匯出成JSON檔案節省後續處理複雜度
         dest = file[:-4]+".json"
         if path.exists(dest):
             continue
         print(total, file)
-        insp = insp_reader.read(file)
         sfc = sfc_reader.read(file)
-        if insp is None:
-            log.error("%s can't read", file)
-            continue
-        combin(insp=insp, sfc=sfc)
+        if args.station:
+            insp = insp_reader.read(file)
+            if insp is None:
+                log.error("%s can't read", file)
+                continue
+            combin(insp=insp, sfc=sfc)
         changePicPath(sfc, file)
         total -= 1
         with open(dest, 'wt') as f:
