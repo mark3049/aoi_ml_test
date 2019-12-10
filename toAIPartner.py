@@ -82,10 +82,10 @@ def write_to_folder(info, dest):
             d['DefectName'] = Window['Name']
             d['MachineDefect'] = Window['MachineDefect']
             d['Manual Inspect Result'] = Window['ConfirmDefect']
-            d['X1'] = Window['X1']
-            d['X2'] = Window['X2']
-            d['Y1'] = Window['Y1']
-            d['Y2'] = Window['Y2']
+            # d['X1'] = Window['X1']
+            # d['X2'] = Window['X2']
+            # d['Y1'] = Window['Y1']
+            # d['Y2'] = Window['Y2']
             try:
                 with open(out_json, 'wt') as fp:
                     json.dump(d, fp, indent=True, sort_keys=True)
